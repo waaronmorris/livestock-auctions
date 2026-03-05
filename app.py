@@ -15,7 +15,7 @@ def _():
     COLOR_SCHEME = ["#648FFF", "#DC267F", "#FFB000", "#FE6100", "#785EF0", "#1B9E77"]
 
     # Configure Altair for dark theme
-    alt.themes.enable("dark")
+    _theme = alt.themes.enable("dark")
 
     return COLOR_SCHEME, alt, mo, np, pd
 
