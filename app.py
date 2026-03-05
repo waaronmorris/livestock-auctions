@@ -283,6 +283,122 @@ def _(halflife_slider, mo, reg_df):
 
 @app.cell
 def _(mo):
+    mo.md("""## Total Price Per Head Analysis
+
+*Does the **total price per animal** stay relatively constant across weights? This would indicate buyers pay a fixed amount per head rather than strictly per pound.*
+    """)
+    return
+
+
+@app.cell
+def _(COLOR_SCHEME, alt, filtered_df, np, pd):
+    # Calculate total price per head for ALL cattle
+    head_price_df = filtered_df[(filtered_df["avg_weight"] > 0) & (filtered_df["avg_price"] > 0)].copy()
+    head_price_df["total_price_per_head"] = head_price_df["avg_price"] * head_price_df["avg_weight"] / 100
+    head_price_df["market_type"] = head_price_df["category"] + " " + head_price_df["cattle_type"]
+
+    # Sample for plotting (all market types)
+    head_sample = head_price_df.groupby("market_type", group_keys=False).apply(
+        lambda x: x.sample(n=min(len(x), 300), random_state=42), include_groups=False
+    )
+    head_sample["market_type"] = head_price_df.loc[head_sample.index, "market_type"]
+
+    # Calculate R² for both models by market type
+    model_comparison = []
+    for _mt in sorted(head_price_df["market_type"].unique()):
+        _sub = head_price_df[head_price_df["market_type"] == _mt]
+        if len(_sub) > 20:
+            _x = _sub["avg_weight"].values
+            _y_cwt = _sub["avg_price"].values
+            _y_total = _sub["total_price_per_head"].values
+
+            # R² for $/cwt linear model
+            _slope_cwt, _int_cwt = np.polyfit(_x, _y_cwt, 1)
+            _pred_cwt = _int_cwt + _slope_cwt * _x
+            _ss_res_cwt = np.sum((_y_cwt - _pred_cwt) ** 2)
+            _ss_tot_cwt = np.sum((_y_cwt - np.mean(_y_cwt)) ** 2)
+            _r2_cwt = 1 - _ss_res_cwt / _ss_tot_cwt if _ss_tot_cwt > 0 else 0
+
+            # R² for total price linear model
+            _slope_total, _int_total = np.polyfit(_x, _y_total, 1)
+            _pred_total = _int_total + _slope_total * _x
+            _ss_res_total = np.sum((_y_total - _pred_total) ** 2)
+            _ss_tot_total = np.sum((_y_total - np.mean(_y_total)) ** 2)
+            _r2_total = 1 - _ss_res_total / _ss_tot_total if _ss_tot_total > 0 else 0
+
+            # Coefficient of variation (lower = more constant)
+            _cv_total = np.std(_y_total) / np.mean(_y_total) * 100
+
+            model_comparison.append({
+                "market_type": _mt,
+                "slope_cwt": _slope_cwt,
+                "r2_cwt_model": _r2_cwt,
+                "slope_total": _slope_total,
+                "r2_total_model": _r2_total,
+                "avg_price_per_head": np.mean(_y_total),
+                "cv_price_per_head": _cv_total,
+                "n": len(_sub),
+            })
+
+    model_df = pd.DataFrame(model_comparison)
+
+    # Scatter plot: Weight vs Total Price Per Head (all market types)
+    head_price_chart = (
+        alt.Chart(head_sample)
+        .mark_circle(opacity=0.4)
+        .encode(
+            x=alt.X("avg_weight:Q", title="Weight (lbs)"),
+            y=alt.Y("total_price_per_head:Q", title="Total Price Per Head ($)"),
+            color=alt.Color("market_type:N", title="Market Type", scale=alt.Scale(range=COLOR_SCHEME)),
+            tooltip=[
+                "market_type",
+                alt.Tooltip("avg_weight:Q", format=".0f", title="Weight"),
+                alt.Tooltip("avg_price:Q", format="$.2f", title="$/cwt"),
+                alt.Tooltip("total_price_per_head:Q", format="$.0f", title="Price/Head"),
+            ],
+        )
+        .properties(width="container", height=450, title="All Cattle: Weight vs Total Price Per Head")
+        .interactive()
+    )
+    head_price_chart
+    return head_price_chart, head_price_df, head_sample, model_comparison, model_df
+
+
+@app.cell
+def _(mo, model_df):
+    if len(model_df) > 0:
+        _analysis = """**Model Comparison by Market Type:**
+
+| Market Type | N | Avg $/Head | CV% | $/cwt Slope | R² ($/cwt) | $/Head Slope | R² ($/Head) | Interpretation |
+|-------------|---|------------|-----|-------------|------------|--------------|-------------|----------------|
+"""
+        for _, _r in model_df.iterrows():
+            # Interpretation based on slopes and R²
+            _cwt_dir = "↓" if _r["slope_cwt"] < 0 else "↑"
+            _head_dir = "↓" if _r["slope_total"] < 0 else "↑"
+
+            if abs(_r["slope_total"]) < 0.5 and _r["r2_total_model"] < 0.2:
+                _interp = "≈ Constant $/head"
+            elif _r["slope_total"] > 0.5:
+                _interp = "↑ More weight = more $"
+            else:
+                _interp = "↓ More weight = less $"
+
+            _analysis += f"| {_r['market_type']} | {_r['n']:,} | ${_r['avg_price_per_head']:,.0f} | {_r['cv_price_per_head']:.0f}% | {_cwt_dir} {_r['slope_cwt']:.3f} | {_r['r2_cwt_model']:.2f} | {_head_dir} ${_r['slope_total']:.2f} | {_r['r2_total_model']:.2f} | {_interp} |\n"
+
+        _analysis += """
+**Key insights:**
+- **FEEDER cattle**: Negative $/cwt slope but positive $/head slope → heavier calves cost more total, but less per pound
+- **SLAUGHTER cattle**: Positive $/cwt slope AND positive $/head slope → heavier animals worth more (more meat)
+- **$/Head Slope**: Dollars added per additional pound of weight
+- **Low R² ($/Head)**: Price per head is relatively constant regardless of weight
+"""
+        mo.md(_analysis)
+    return
+
+
+@app.cell
+def _(mo):
     mo.md("## Year-over-Year Comparison")
     return
 
