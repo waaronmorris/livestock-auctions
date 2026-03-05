@@ -1,5 +1,6 @@
-# Data
-/data/
+# Data (except the main CSV)
+/data/*
+!/data/clay_county_auction_data.csv
 /pdfs/
 sync.log
 
