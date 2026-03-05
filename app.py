@@ -1,18 +1,38 @@
 import marimo
 
 __generated_with = "0.20.4"
-app = marimo.App(width="medium")
+app = marimo.App(width="full")
 
 
 @app.cell
 def _():
     import marimo as mo
     import pandas as pd
-    import altair as alt
     import plotly.express as px
+    import plotly.graph_objects as go
+    import plotly.io as pio
     from pathlib import Path
 
-    return Path, alt, mo, pd, px
+    # Professional color palette (IBM colorblind-safe)
+    COLOR_SEQUENCE = ["#648FFF", "#DC267F", "#FFB000", "#FE6100", "#785EF0", "#1B9E77"]
+
+    # Custom Plotly template (dark theme to match Marimo)
+    pio.templates["livestock"] = go.layout.Template(
+        layout=go.Layout(
+            font=dict(family="system-ui, -apple-system, sans-serif", size=12, color="#E5E7EB"),
+            title=dict(font=dict(size=16, color="#F9FAFB"), x=0, xanchor="left"),
+            paper_bgcolor="#1F2937",
+            plot_bgcolor="#111827",
+            xaxis=dict(showgrid=True, gridcolor="#374151", showline=True, linecolor="#4B5563", tickcolor="#9CA3AF"),
+            yaxis=dict(showgrid=True, gridcolor="#374151", showline=False, tickcolor="#9CA3AF"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(0,0,0,0)"),
+            colorway=COLOR_SEQUENCE,
+            margin=dict(l=60, r=30, t=80, b=60),
+        )
+    )
+    pio.templates.default = "livestock"
+
+    return COLOR_SEQUENCE, Path, go, mo, pd, pio, px
 
 
 @app.cell
@@ -23,91 +43,68 @@ def _(Path, pd):
     df["year"] = df["auction_date"].dt.year
     df["month"] = df["auction_date"].dt.month
     df["year_month"] = df["auction_date"].dt.to_period("M").astype(str)
-
-    # Clean data - replace NaN with None for JSON compatibility
     df = df.fillna(0)
-    return (df,)
+
+    # Key metrics
+    latest_date = df["auction_date"].max()
+    earliest_date = df["auction_date"].min()
+    total_records = len(df)
+    total_auctions = df["auction_date"].nunique()
+    total_head = int(df["head_count"].sum())
+
+    # Recent average price (last 6 months)
+    six_months_ago = latest_date - pd.Timedelta(days=180)
+    recent_df = df[df["auction_date"] >= six_months_ago]
+    recent_avg_price = recent_df[recent_df["avg_price"] > 0]["avg_price"].mean()
+
+    return df, earliest_date, latest_date, recent_avg_price, total_auctions, total_head, total_records
 
 
 @app.cell
-def _(mo):
-    mo.md(
-        """
-        # Clay County Livestock Auction Analysis
+def _(earliest_date, latest_date, mo):
+    mo.md(f"""
+    # Clay County Livestock Auction
 
-        Interactive analysis of cattle prices from the Clay County Livestock Auction in Lineville, AL.
-        Data spans from 2019 to 2025.
-        """
-    )
+    **Market Analysis Dashboard** · Lineville, Alabama · {earliest_date.strftime('%b %Y')} – {latest_date.strftime('%b %Y')}
+    """)
+    return
+
+
+@app.cell
+def _(mo, recent_avg_price, total_auctions, total_head, total_records):
+    mo.md(f"""
+    | Total Records | Auction Days | Total Head Sold | Avg Price (6mo) |
+    |:-------------:|:------------:|:---------------:|:---------------:|
+    | **{total_records:,}** | **{total_auctions:,}** | **{total_head:,}** | **${recent_avg_price:.2f}/cwt** |
+    """)
     return
 
 
 @app.cell
 def _(df, mo):
-    # Summary stats
-    total_records = len(df)
-    date_range = f"{df['auction_date'].min().date()} to {df['auction_date'].max().date()}"
-    total_auctions = df["auction_date"].nunique()
-
-    mo.md(
-        f"""
-        ## Data Overview
-
-        | Metric | Value |
-        |--------|-------|
-        | Total Records | {total_records:,} |
-        | Date Range | {date_range} |
-        | Total Auction Days | {total_auctions} |
-        """
-    )
-    return date_range, total_auctions, total_records
-
-
-@app.cell
-def _(df, mo):
-    # Create filters
     categories = ["All"] + sorted(df["category"].unique().tolist())
     cattle_types = ["All"] + sorted(df["cattle_type"].unique().tolist())
-    years = ["All"] + sorted([int(y) for y in df["year"].unique().tolist()])
+    years = ["All"] + sorted([str(int(y)) for y in df["year"].unique().tolist()])
 
-    category_select = mo.ui.dropdown(
-        options=categories, value="All", label="Category"
-    )
-    cattle_type_select = mo.ui.dropdown(
-        options=cattle_types, value="All", label="Cattle Type"
-    )
-    year_select = mo.ui.dropdown(
-        options=[str(y) for y in years], value="All", label="Year"
-    )
-
-    mo.md("## Filters")
-    return (
-        categories,
-        category_select,
-        cattle_type_select,
-        cattle_types,
-        year_select,
-        years,
-    )
+    category_select = mo.ui.dropdown(options=categories, value="All", label="Category")
+    cattle_type_select = mo.ui.dropdown(options=cattle_types, value="All", label="Cattle Type")
+    year_select = mo.ui.dropdown(options=years, value="All", label="Year")
+    return categories, category_select, cattle_type_select, cattle_types, year_select, years
 
 
 @app.cell
 def _(category_select, cattle_type_select, mo, year_select):
-    mo.hstack([category_select, cattle_type_select, year_select])
+    mo.hstack([category_select, cattle_type_select, year_select], justify="start", gap=1)
     return
 
 
 @app.cell
 def _(category_select, cattle_type_select, df, year_select):
-    # Apply filters
     filtered_df = df.copy()
-
     if category_select.value != "All":
         filtered_df = filtered_df[filtered_df["category"] == category_select.value]
-
     if cattle_type_select.value != "All":
         filtered_df = filtered_df[filtered_df["cattle_type"] == cattle_type_select.value]
-
     if year_select.value != "All":
         filtered_df = filtered_df[filtered_df["year"] == int(year_select.value)]
     return (filtered_df,)
@@ -115,19 +112,18 @@ def _(category_select, cattle_type_select, df, year_select):
 
 @app.cell
 def _(filtered_df, mo):
-    mo.md(f"**Showing {len(filtered_df):,} records**")
+    mo.md(f"*Showing {len(filtered_df):,} records*")
     return
 
 
 @app.cell
 def _(mo):
-    mo.md("## Average Price Trends Over Time")
+    mo.md("## Price Trends Over Time")
     return
 
 
 @app.cell
-def _(alt, filtered_df):
-    # Calculate monthly averages
+def _(COLOR_SEQUENCE, filtered_df, go):
     monthly_avg = (
         filtered_df[filtered_df["avg_price"] > 0]
         .groupby(["year_month", "cattle_type"])
@@ -135,52 +131,24 @@ def _(alt, filtered_df):
         .reset_index()
     )
 
-    # Price trend chart
-    price_chart = (
-        alt.Chart(monthly_avg)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("year_month:O", title="Month", axis=alt.Axis(labelAngle=-45)),
-            y=alt.Y("avg_price:Q", title="Average Price ($/cwt)"),
-            color=alt.Color("cattle_type:N", title="Cattle Type"),
-            tooltip=["year_month", "cattle_type", "avg_price:Q", "head_count:Q"],
-        )
-        .properties(width=800, height=400, title="Monthly Average Prices by Cattle Type")
-        .interactive()
+    price_fig = go.Figure()
+    for _i, _ct in enumerate(sorted(monthly_avg["cattle_type"].unique())):
+        _data = monthly_avg[monthly_avg["cattle_type"] == _ct].sort_values("year_month")
+        price_fig.add_trace(go.Scatter(
+            x=_data["year_month"], y=_data["avg_price"],
+            mode="lines+markers", name=_ct,
+            line=dict(width=2.5, color=COLOR_SEQUENCE[_i % len(COLOR_SEQUENCE)]),
+            marker=dict(size=5),
+        ))
+
+    price_fig.update_layout(
+        title="Monthly Average Prices by Cattle Type",
+        xaxis_title="Month", yaxis_title="Average Price ($/cwt)",
+        yaxis_tickprefix="$", height=400, hovermode="x unified",
     )
-    price_chart
-    return monthly_avg, price_chart
-
-
-@app.cell
-def _(mo):
-    mo.md("## Price Distribution by Weight Class")
-    return
-
-
-@app.cell
-def _(alt, filtered_df, pd):
-    # Create weight classes
-    weight_df = filtered_df[filtered_df["avg_weight"] > 0].copy()
-    weight_df["weight_class"] = pd.cut(
-        weight_df["avg_weight"],
-        bins=[0, 300, 400, 500, 600, 700, 800, 1000, 2000],
-        labels=["<300", "300-400", "400-500", "500-600", "600-700", "700-800", "800-1000", ">1000"],
-    )
-
-    # Box plot by weight class
-    weight_price_chart = (
-        alt.Chart(weight_df[weight_df["avg_price"] > 0])
-        .mark_boxplot()
-        .encode(
-            x=alt.X("weight_class:O", title="Weight Class (lbs)"),
-            y=alt.Y("avg_price:Q", title="Price ($/cwt)"),
-            color=alt.Color("cattle_type:N", title="Cattle Type"),
-        )
-        .properties(width=800, height=400, title="Price Distribution by Weight Class")
-    )
-    weight_price_chart
-    return weight_df, weight_price_chart
+    price_fig.update_xaxes(tickangle=-45, nticks=20)
+    price_fig
+    return monthly_avg, price_fig
 
 
 @app.cell
@@ -190,28 +158,95 @@ def _(mo):
 
 
 @app.cell
-def _(alt, filtered_df):
-    # Volume by month
-    volume_monthly = (
-        filtered_df.groupby(["year_month", "category"])
-        .agg({"head_count": "sum"})
-        .reset_index()
+def _(filtered_df, px):
+    volume_data = filtered_df.groupby(["year_month", "category"]).agg({"head_count": "sum"}).reset_index()
+
+    volume_fig = px.bar(
+        volume_data, x="year_month", y="head_count", color="category",
+        title="Monthly Volume by Category",
+        labels={"year_month": "Month", "head_count": "Head Count", "category": "Category"},
+        height=350,
+    )
+    volume_fig.update_xaxes(tickangle=-45, nticks=20)
+    volume_fig
+    return volume_data, volume_fig
+
+
+@app.cell
+def _(mo):
+    mo.md("## Weight vs Price Analysis")
+    return
+
+
+@app.cell
+def _(mo):
+    halflife_slider = mo.ui.slider(start=6, stop=60, value=24, step=6, label="Recency half-life (months)")
+    halflife_slider
+    return (halflife_slider,)
+
+
+@app.cell
+def _(COLOR_SEQUENCE, filtered_df, go, halflife_slider, pd, px):
+    import numpy as np
+    import statsmodels.api as sm
+
+    scatter_full = filtered_df[(filtered_df["avg_weight"] > 0) & (filtered_df["avg_price"] > 0)].copy()
+    scatter_full["market_type"] = scatter_full["category"] + " " + scatter_full["cattle_type"]
+
+    # Recency weights
+    _max_date = scatter_full["auction_date"].max()
+    scatter_full["days_ago"] = (_max_date - scatter_full["auction_date"]).dt.days
+    _halflife_days = halflife_slider.value * 30
+    scatter_full["weight"] = np.exp(-np.log(2) * scatter_full["days_ago"] / _halflife_days)
+
+    # Weighted regression
+    reg_results = []
+    trend_lines = []
+    for _mt in sorted(scatter_full["market_type"].unique()):
+        _sub = scatter_full[scatter_full["market_type"] == _mt]
+        if len(_sub) > 10:
+            _X = sm.add_constant(_sub["avg_weight"])
+            _model = sm.WLS(_sub["avg_price"], _X, weights=_sub["weight"]).fit()
+            _int, _slope = _model.params
+            reg_results.append({"market_type": _mt, "slope": _slope, "intercept": _int, "r2": _model.rsquared, "n": len(_sub)})
+            _xr = np.linspace(_sub["avg_weight"].min(), _sub["avg_weight"].max(), 50)
+            trend_lines.append({"mt": _mt, "x": _xr, "y": _int + _slope * _xr})
+
+    reg_df = pd.DataFrame(reg_results)
+
+    # Sample for plotting
+    scatter_sample = scatter_full.groupby("market_type", group_keys=False).apply(
+        lambda x: x.sample(n=min(len(x), 300), random_state=42), include_groups=False
+    )
+    scatter_sample["market_type"] = scatter_full.loc[scatter_sample.index, "market_type"]
+
+    scatter_fig = px.scatter(
+        scatter_sample, x="avg_weight", y="avg_price", color="market_type",
+        title=f"Weight vs Price ({halflife_slider.value}-month half-life)",
+        labels={"avg_weight": "Weight (lbs)", "avg_price": "Price ($/cwt)", "market_type": "Market Type"},
+        opacity=0.5, height=500,
     )
 
-    volume_chart = (
-        alt.Chart(volume_monthly)
-        .mark_bar()
-        .encode(
-            x=alt.X("year_month:O", title="Month", axis=alt.Axis(labelAngle=-45)),
-            y=alt.Y("head_count:Q", title="Head Count"),
-            color=alt.Color("category:N", title="Category"),
-            tooltip=["year_month", "category", "head_count:Q"],
-        )
-        .properties(width=800, height=300, title="Monthly Volume by Category")
-        .interactive()
-    )
-    volume_chart
-    return volume_chart, volume_monthly
+    for _j, _t in enumerate(trend_lines):
+        scatter_fig.add_trace(go.Scatter(
+            x=_t["x"], y=_t["y"], mode="lines", showlegend=False,
+            line=dict(color=COLOR_SEQUENCE[_j % len(COLOR_SEQUENCE)], width=3),
+        ))
+
+    scatter_fig.update_layout(yaxis_tickprefix="$")
+    scatter_fig
+    return np, reg_df, reg_results, scatter_fig, scatter_full, scatter_sample, sm, trend_lines
+
+
+@app.cell
+def _(halflife_slider, mo, reg_df):
+    if len(reg_df) > 0:
+        _rows = "| Market Type | Equation | R² | N | Trend |\n|---|---|---|---|---|\n"
+        for _, _r in reg_df.iterrows():
+            _dir = "↓" if _r["slope"] < 0 else "↑"
+            _rows += f"| {_r['market_type']} | y = {_r['slope']:.4f}x + {_r['intercept']:.1f} | {_r['r2']:.3f} | {_r['n']:,} | {_dir} |\n"
+        mo.md(f"**Regression Equations ({halflife_slider.value}-month half-life)**\n\n{_rows}")
+    return
 
 
 @app.cell
@@ -221,162 +256,23 @@ def _(mo):
 
 
 @app.cell
-def _(alt, filtered_df):
-    # Yearly averages by cattle type
-    yearly_avg = (
+def _(filtered_df, px):
+    yearly_data = (
         filtered_df[filtered_df["avg_price"] > 0]
         .groupby(["year", "cattle_type"])
-        .agg({"avg_price": "mean", "head_count": "sum"})
+        .agg({"avg_price": "mean"})
         .reset_index()
     )
 
-    yearly_chart = (
-        alt.Chart(yearly_avg)
-        .mark_bar()
-        .encode(
-            x=alt.X("year:O", title="Year"),
-            y=alt.Y("avg_price:Q", title="Average Price ($/cwt)"),
-            color=alt.Color("cattle_type:N", title="Cattle Type"),
-            xOffset="cattle_type:N",
-            tooltip=["year", "cattle_type", "avg_price:Q", "head_count:Q"],
-        )
-        .properties(width=800, height=400, title="Average Prices by Year and Cattle Type")
+    yearly_fig = px.bar(
+        yearly_data, x="year", y="avg_price", color="cattle_type", barmode="group",
+        title="Average Prices by Year and Cattle Type",
+        labels={"year": "Year", "avg_price": "Avg Price ($/cwt)", "cattle_type": "Cattle Type"},
+        height=400,
     )
-    yearly_chart
-    return yearly_avg, yearly_chart
-
-
-@app.cell
-def _(mo):
-    mo.md("## Weight vs Price Scatter Plot")
-    return
-
-
-@app.cell
-def _(mo):
-    # Slider for recency weighting
-    halflife_slider = mo.ui.slider(
-        start=6,
-        stop=60,
-        value=24,
-        step=6,
-        label="Half-life (months)",
-    )
-    halflife_slider
-    return (halflife_slider,)
-
-
-@app.cell
-def _(filtered_df, halflife_slider, pd, px):
-    import numpy as np
-    import statsmodels.api as sm
-    import plotly.graph_objects as go
-
-    # Filter for valid data points and create combined market type
-    scatter_df_full = filtered_df[
-        (filtered_df["avg_weight"] > 0) & (filtered_df["avg_price"] > 0)
-    ].copy()
-    scatter_df_full["market_type"] = scatter_df_full["category"] + " " + scatter_df_full["cattle_type"]
-
-    # Calculate weights based on recency (exponential decay)
-    max_date = scatter_df_full["auction_date"].max()
-    scatter_df_full["days_ago"] = (max_date - scatter_df_full["auction_date"]).dt.days
-    halflife_days = halflife_slider.value * 30  # Convert months to days
-    scatter_df_full["weight"] = np.exp(-np.log(2) * scatter_df_full["days_ago"] / halflife_days)
-
-    # Calculate weighted linear regression for each market type
-    regression_results = []
-    trendline_data = []
-
-    for market_type in sorted(scatter_df_full["market_type"].unique()):
-        subset = scatter_df_full[scatter_df_full["market_type"] == market_type]
-        if len(subset) > 10:
-            X = sm.add_constant(subset["avg_weight"])
-            y = subset["avg_price"]
-            weights = subset["weight"]
-
-            # Weighted least squares
-            model = sm.WLS(y, X, weights=weights)
-            results = model.fit()
-
-            intercept, slope = results.params
-            r_squared = results.rsquared
-
-            regression_results.append({
-                "market_type": market_type,
-                "slope": slope,
-                "intercept": intercept,
-                "r_squared": r_squared,
-                "n": len(subset),
-            })
-
-            # Generate trendline points
-            x_range = np.linspace(subset["avg_weight"].min(), subset["avg_weight"].max(), 100)
-            y_pred = intercept + slope * x_range
-            trendline_data.append({
-                "market_type": market_type,
-                "x": x_range,
-                "y": y_pred,
-            })
-
-    regression_df = pd.DataFrame(regression_results)
-
-    # Sample data for plotting (max 400 points per market type)
-    scatter_df = scatter_df_full.groupby("market_type", group_keys=False).apply(
-        lambda x: x.sample(n=min(len(x), 400), random_state=42)
-    )
-
-    # Create Plotly figure
-    scatter_chart = px.scatter(
-        scatter_df,
-        x="avg_weight",
-        y="avg_price",
-        color="market_type",
-        labels={
-            "avg_weight": "Average Weight (lbs)",
-            "avg_price": "Price ($/cwt)",
-            "market_type": "Market Type",
-        },
-        title=f"Weight vs Price by Market Type (Recency-Weighted Regression, {halflife_slider.value}mo half-life)",
-        hover_data=["auction_date", "head_count"],
-        opacity=0.6,
-    )
-
-    # Add weighted trendlines
-    colors = px.colors.qualitative.Plotly
-    for i, trend in enumerate(trendline_data):
-        scatter_chart.add_trace(
-            go.Scatter(
-                x=trend["x"],
-                y=trend["y"],
-                mode="lines",
-                name=f"{trend['market_type']} (trend)",
-                line=dict(color=colors[i % len(colors)], width=3),
-                showlegend=False,
-            )
-        )
-
-    scatter_chart.update_layout(
-        width=900,
-        height=600,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    )
-
-    scatter_chart
-    return go, np, regression_df, scatter_chart, scatter_df, scatter_df_full, sm, trendline_data
-
-
-@app.cell
-def _(halflife_slider, mo, regression_df):
-    # Display regression equations
-    if len(regression_df) > 0:
-        eq_text = f"### Recency-Weighted Regression Equations ({halflife_slider.value}-month half-life)\n\n"
-        eq_text += "| Market Type | Equation | R² | N |\n"
-        eq_text += "|-------------|----------|----|----|"
-        for _, row in regression_df.iterrows():
-            eq_text += f"\n| {row['market_type']} | y = {row['slope']:.4f}x + {row['intercept']:.2f} | {row['r_squared']:.4f} | {row['n']:,} |"
-        mo.md(eq_text)
-    return (eq_text,)
+    yearly_fig.update_layout(yaxis_tickprefix="$", xaxis_type="category")
+    yearly_fig
+    return yearly_data, yearly_fig
 
 
 @app.cell
@@ -387,48 +283,26 @@ def _(mo):
 
 @app.cell
 def _(filtered_df, mo):
-    # Summary stats table
     summary = (
         filtered_df[filtered_df["avg_price"] > 0]
         .groupby(["category", "cattle_type"])
-        .agg(
-            {
-                "avg_price": ["mean", "min", "max", "std"],
-                "head_count": "sum",
-                "avg_weight": "mean",
-            }
-        )
+        .agg({"avg_price": ["mean", "min", "max"], "head_count": "sum", "avg_weight": "mean"})
         .round(2)
     )
-    summary.columns = ["Avg Price", "Min Price", "Max Price", "Price Std", "Total Head", "Avg Weight"]
+    summary.columns = ["Avg Price", "Min Price", "Max Price", "Total Head", "Avg Weight"]
     summary = summary.reset_index()
-
-    mo.ui.table(summary)
+    mo.ui.table(summary, selection=None)
     return (summary,)
 
 
 @app.cell
 def _(mo):
-    mo.md("## Raw Data Explorer")
+    mo.md("""
+    ---
+    **Data Source:** USDA Agricultural Marketing Service (AMS) · Clay County Livestock Auction, Lineville, AL
+    Report ID: AMS_1989 · Updated weekly
+    """)
     return
-
-
-@app.cell
-def _(filtered_df, mo):
-    display_df = filtered_df[
-        [
-            "auction_date",
-            "category",
-            "cattle_type",
-            "grade",
-            "head_count",
-            "avg_weight",
-            "avg_price",
-        ]
-    ].head(100).copy()
-    display_df["auction_date"] = display_df["auction_date"].astype(str)
-    mo.ui.table(display_df)
-    return (display_df,)
 
 
 if __name__ == "__main__":
