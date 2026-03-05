@@ -9,9 +9,10 @@ def _():
     import marimo as mo
     import pandas as pd
     import altair as alt
+    import plotly.express as px
     from pathlib import Path
 
-    return Path, alt, mo, pd
+    return Path, alt, mo, pd, px
 
 
 @app.cell
@@ -243,6 +244,85 @@ def _(alt, filtered_df):
     )
     yearly_chart
     return yearly_avg, yearly_chart
+
+
+@app.cell
+def _(mo):
+    mo.md("## Weight vs Price Scatter Plot")
+    return
+
+
+@app.cell
+def _(filtered_df, pd, px):
+    from scipy import stats
+
+    # Filter for valid data points and create combined market type
+    scatter_df_full = filtered_df[
+        (filtered_df["avg_weight"] > 0) & (filtered_df["avg_price"] > 0)
+    ].copy()
+    scatter_df_full["market_type"] = scatter_df_full["category"] + " " + scatter_df_full["cattle_type"]
+
+    # Calculate linear regression for each market type (use full data)
+    regression_results = []
+    for market_type in scatter_df_full["market_type"].unique():
+        subset = scatter_df_full[scatter_df_full["market_type"] == market_type]
+        if len(subset) > 10:  # Need enough points
+            slope, intercept, r_value, p_value, std_err = stats.linregress(
+                subset["avg_weight"], subset["avg_price"]
+            )
+            regression_results.append({
+                "market_type": market_type,
+                "slope": slope,
+                "intercept": intercept,
+                "r_squared": r_value**2,
+                "n": len(subset),
+            })
+
+    regression_df = pd.DataFrame(regression_results)
+
+    # Sample data for plotting (max 400 points per market type)
+    scatter_df = scatter_df_full.groupby("market_type", group_keys=False).apply(
+        lambda x: x.sample(n=min(len(x), 400), random_state=42)
+    )
+
+    # Plotly scatter plot with trendlines
+    scatter_chart = px.scatter(
+        scatter_df,
+        x="avg_weight",
+        y="avg_price",
+        color="market_type",
+        trendline="ols",
+        labels={
+            "avg_weight": "Average Weight (lbs)",
+            "avg_price": "Price ($/cwt)",
+            "market_type": "Market Type",
+        },
+        title="Weight vs Price by Market Type (with Linear Regression)",
+        hover_data=["auction_date", "head_count"],
+        opacity=0.6,
+    )
+
+    scatter_chart.update_layout(
+        width=900,
+        height=600,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+
+    scatter_chart
+    return regression_df, scatter_chart, scatter_df, scatter_df_full, stats
+
+
+@app.cell
+def _(mo, regression_df):
+    # Display regression equations
+    if len(regression_df) > 0:
+        eq_text = "### Linear Regression Equations\n\n"
+        eq_text += "| Market Type | Equation | R² | N |\n"
+        eq_text += "|-------------|----------|----|----|"
+        for _, row in regression_df.iterrows():
+            eq_text += f"\n| {row['market_type']} | y = {row['slope']:.4f}x + {row['intercept']:.2f} | {row['r_squared']:.4f} | {row['n']:,} |"
+        mo.md(eq_text)
+    return (eq_text,)
 
 
 @app.cell
