@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.livestock-auctions.sync</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/waaronmorris/Projects/usda-market-analyis/livestock-auctions/.venv/bin/python</string>
+        <string>/Users/waaronmorris/Projects/usda-market-analyis/livestock-auctions/auto_sync.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/waaronmorris/Projects/usda-market-analyis/livestock-auctions</string>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <!-- Run every Tuesday at 6:00 AM (reports published Monday) -->
+        <key>Weekday</key>
+        <integer>2</integer>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/waaronmorris/Projects/usda-market-analyis/livestock-auctions/sync.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/waaronmorris/Projects/usda-market-analyis/livestock-auctions/sync.log</string>
+</dict>
+</plist>
