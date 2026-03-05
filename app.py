@@ -342,8 +342,23 @@ def _(COLOR_SCHEME, alt, filtered_df, np, pd):
 
     model_df = pd.DataFrame(model_comparison)
 
+    # Create trend line data for total price per head
+    head_trend_data = []
+    for _, _r in model_df.iterrows():
+        _sub = head_price_df[head_price_df["market_type"] == _r["market_type"]]
+        _x_min, _x_max = _sub["avg_weight"].min(), _sub["avg_weight"].max()
+        for _x in np.linspace(_x_min, _x_max, 50):
+            # Use the slope and intercept from the model
+            _y = _r["slope_total"] * _x + (_r["avg_price_per_head"] - _r["slope_total"] * _sub["avg_weight"].mean())
+            head_trend_data.append({
+                "market_type": _r["market_type"],
+                "avg_weight": _x,
+                "total_price_per_head": _y,
+            })
+    head_trend_df = pd.DataFrame(head_trend_data)
+
     # Scatter plot: Weight vs Total Price Per Head (all market types)
-    head_price_chart = (
+    head_scatter = (
         alt.Chart(head_sample)
         .mark_circle(opacity=0.4)
         .encode(
@@ -357,11 +372,26 @@ def _(COLOR_SCHEME, alt, filtered_df, np, pd):
                 alt.Tooltip("total_price_per_head:Q", format="$.0f", title="Price/Head"),
             ],
         )
+    )
+
+    # Trend lines for total price per head
+    head_trend_lines = (
+        alt.Chart(head_trend_df)
+        .mark_line(strokeWidth=3)
+        .encode(
+            x="avg_weight:Q",
+            y="total_price_per_head:Q",
+            color=alt.Color("market_type:N", scale=alt.Scale(range=COLOR_SCHEME)),
+        )
+    )
+
+    head_price_chart = (
+        (head_scatter + head_trend_lines)
         .properties(width="container", height=450, title="All Cattle: Weight vs Total Price Per Head")
         .interactive()
     )
     head_price_chart
-    return head_price_chart, head_price_df, head_sample, model_comparison, model_df
+    return head_price_chart, head_price_df, head_sample, head_trend_data, head_trend_df, model_comparison, model_df
 
 
 @app.cell
