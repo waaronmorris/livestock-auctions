@@ -253,8 +253,24 @@ def _(mo):
 
 
 @app.cell
-def _(filtered_df, pd, px):
-    from scipy import stats
+def _(mo):
+    # Slider for recency weighting
+    halflife_slider = mo.ui.slider(
+        start=6,
+        stop=60,
+        value=24,
+        step=6,
+        label="Half-life (months)",
+    )
+    halflife_slider
+    return (halflife_slider,)
+
+
+@app.cell
+def _(filtered_df, halflife_slider, pd, px):
+    import numpy as np
+    import statsmodels.api as sm
+    import plotly.graph_objects as go
 
     # Filter for valid data points and create combined market type
     scatter_df_full = filtered_df[
@@ -262,20 +278,45 @@ def _(filtered_df, pd, px):
     ].copy()
     scatter_df_full["market_type"] = scatter_df_full["category"] + " " + scatter_df_full["cattle_type"]
 
-    # Calculate linear regression for each market type (use full data)
+    # Calculate weights based on recency (exponential decay)
+    max_date = scatter_df_full["auction_date"].max()
+    scatter_df_full["days_ago"] = (max_date - scatter_df_full["auction_date"]).dt.days
+    halflife_days = halflife_slider.value * 30  # Convert months to days
+    scatter_df_full["weight"] = np.exp(-np.log(2) * scatter_df_full["days_ago"] / halflife_days)
+
+    # Calculate weighted linear regression for each market type
     regression_results = []
-    for market_type in scatter_df_full["market_type"].unique():
+    trendline_data = []
+
+    for market_type in sorted(scatter_df_full["market_type"].unique()):
         subset = scatter_df_full[scatter_df_full["market_type"] == market_type]
-        if len(subset) > 10:  # Need enough points
-            slope, intercept, r_value, p_value, std_err = stats.linregress(
-                subset["avg_weight"], subset["avg_price"]
-            )
+        if len(subset) > 10:
+            X = sm.add_constant(subset["avg_weight"])
+            y = subset["avg_price"]
+            weights = subset["weight"]
+
+            # Weighted least squares
+            model = sm.WLS(y, X, weights=weights)
+            results = model.fit()
+
+            intercept, slope = results.params
+            r_squared = results.rsquared
+
             regression_results.append({
                 "market_type": market_type,
                 "slope": slope,
                 "intercept": intercept,
-                "r_squared": r_value**2,
+                "r_squared": r_squared,
                 "n": len(subset),
+            })
+
+            # Generate trendline points
+            x_range = np.linspace(subset["avg_weight"].min(), subset["avg_weight"].max(), 100)
+            y_pred = intercept + slope * x_range
+            trendline_data.append({
+                "market_type": market_type,
+                "x": x_range,
+                "y": y_pred,
             })
 
     regression_df = pd.DataFrame(regression_results)
@@ -285,22 +326,35 @@ def _(filtered_df, pd, px):
         lambda x: x.sample(n=min(len(x), 400), random_state=42)
     )
 
-    # Plotly scatter plot with trendlines
+    # Create Plotly figure
     scatter_chart = px.scatter(
         scatter_df,
         x="avg_weight",
         y="avg_price",
         color="market_type",
-        trendline="ols",
         labels={
             "avg_weight": "Average Weight (lbs)",
             "avg_price": "Price ($/cwt)",
             "market_type": "Market Type",
         },
-        title="Weight vs Price by Market Type (with Linear Regression)",
+        title=f"Weight vs Price by Market Type (Recency-Weighted Regression, {halflife_slider.value}mo half-life)",
         hover_data=["auction_date", "head_count"],
         opacity=0.6,
     )
+
+    # Add weighted trendlines
+    colors = px.colors.qualitative.Plotly
+    for i, trend in enumerate(trendline_data):
+        scatter_chart.add_trace(
+            go.Scatter(
+                x=trend["x"],
+                y=trend["y"],
+                mode="lines",
+                name=f"{trend['market_type']} (trend)",
+                line=dict(color=colors[i % len(colors)], width=3),
+                showlegend=False,
+            )
+        )
 
     scatter_chart.update_layout(
         width=900,
@@ -309,14 +363,14 @@ def _(filtered_df, pd, px):
     )
 
     scatter_chart
-    return regression_df, scatter_chart, scatter_df, scatter_df_full, stats
+    return go, np, regression_df, scatter_chart, scatter_df, scatter_df_full, sm, trendline_data
 
 
 @app.cell
-def _(mo, regression_df):
+def _(halflife_slider, mo, regression_df):
     # Display regression equations
     if len(regression_df) > 0:
-        eq_text = "### Linear Regression Equations\n\n"
+        eq_text = f"### Recency-Weighted Regression Equations ({halflife_slider.value}-month half-life)\n\n"
         eq_text += "| Market Type | Equation | R² | N |\n"
         eq_text += "|-------------|----------|----|----|"
         for _, row in regression_df.iterrows():
