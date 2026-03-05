@@ -10,7 +10,6 @@ def _():
     import pandas as pd
     import altair as alt
     import numpy as np
-    from pathlib import Path
 
     # Professional color palette (IBM colorblind-safe)
     COLOR_SCHEME = ["#648FFF", "#DC267F", "#FFB000", "#FE6100", "#785EF0", "#1B9E77"]
@@ -18,13 +17,14 @@ def _():
     # Configure Altair for dark theme
     alt.themes.enable("dark")
 
-    return COLOR_SCHEME, Path, alt, mo, np, pd
+    return COLOR_SCHEME, alt, mo, np, pd
 
 
 @app.cell
-def _(Path, pd):
-    # Load the data
-    df = pd.read_csv(Path("data/clay_county_auction_data.csv"))
+def _(pd):
+    # Load the data from GitHub raw URL (for WASM compatibility)
+    DATA_URL = "https://raw.githubusercontent.com/waaronmorris/livestock-auctions/master/data/clay_county_auction_data.csv"
+    df = pd.read_csv(DATA_URL)
     df["auction_date"] = pd.to_datetime(df["auction_date"])
     df["year"] = df["auction_date"].dt.year
     df["month"] = df["auction_date"].dt.month
