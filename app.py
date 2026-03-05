@@ -397,31 +397,82 @@ def _(COLOR_SCHEME, alt, filtered_df, np, pd):
 @app.cell
 def _(mo, model_df):
     if len(model_df) > 0:
-        _analysis = """**Model Comparison by Market Type:**
+        _analysis = """**Value of Gain Analysis by Market Type:**
 
-| Market Type | N | Avg $/Head | CV% | $/cwt Slope | R² ($/cwt) | $/Head Slope | R² ($/Head) | Interpretation |
-|-------------|---|------------|-----|-------------|------------|--------------|-------------|----------------|
+The **$/Head Slope** is the market's "value of gain" - what you pay for each additional pound when buying heavier cattle.
+
+| Market Type | N | Avg $/Head | Value of Gain ($/lb) | $/cwt Slope | Decision Guide |
+|-------------|---|------------|---------------------|-------------|----------------|
 """
         for _, _r in model_df.iterrows():
-            # Interpretation based on slopes and R²
+            _vog = _r["slope_total"]  # Value of gain in $/lb
             _cwt_dir = "↓" if _r["slope_cwt"] < 0 else "↑"
-            _head_dir = "↓" if _r["slope_total"] < 0 else "↑"
 
-            if abs(_r["slope_total"]) < 0.5 and _r["r2_total_model"] < 0.2:
-                _interp = "≈ Constant $/head"
-            elif _r["slope_total"] > 0.5:
-                _interp = "↑ More weight = more $"
+            # Decision guide based on typical feeding costs ($1.00-$1.50/lb gain)
+            if _vog < 0.80:
+                _guide = "🟢 Buy heavier (cheap gain)"
+            elif _vog < 1.20:
+                _guide = "🟡 Near break-even"
             else:
-                _interp = "↓ More weight = less $"
+                _guide = "🔴 Buy lighter (feed yourself)"
 
-            _analysis += f"| {_r['market_type']} | {_r['n']:,} | ${_r['avg_price_per_head']:,.0f} | {_r['cv_price_per_head']:.0f}% | {_cwt_dir} {_r['slope_cwt']:.3f} | {_r['r2_cwt_model']:.2f} | {_head_dir} ${_r['slope_total']:.2f} | {_r['r2_total_model']:.2f} | {_interp} |\n"
+            _analysis += f"| {_r['market_type']} | {_r['n']:,} | ${_r['avg_price_per_head']:,.0f} | ${_vog:.2f}/lb | {_cwt_dir} {_r['slope_cwt']:.3f} | {_guide} |\n"
 
         _analysis += """
-**Key insights:**
-- **FEEDER cattle**: Negative $/cwt slope but positive $/head slope → heavier calves cost more total, but less per pound
-- **SLAUGHTER cattle**: Positive $/cwt slope AND positive $/head slope → heavier animals worth more (more meat)
-- **$/Head Slope**: Dollars added per additional pound of weight
-- **Low R² ($/Head)**: Price per head is relatively constant regardless of weight
+---
+**How to use this:**
+- **Value of Gain** = cost per additional pound when buying heavier cattle
+- Compare to your **Cost of Gain** (feeding cost per lb, typically $0.80-$1.50/lb)
+- If Value of Gain < Cost of Gain → **Buy heavier** (cheaper than feeding)
+- If Value of Gain > Cost of Gain → **Buy lighter** (feed them yourself)
+"""
+        mo.md(_analysis)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("### Break-Even Calculator")
+    return
+
+
+@app.cell
+def _(mo):
+    cost_of_gain_input = mo.ui.slider(start=0.50, stop=2.00, value=1.00, step=0.10, label="Your Cost of Gain ($/lb)")
+    cost_of_gain_input
+    return (cost_of_gain_input,)
+
+
+@app.cell
+def _(cost_of_gain_input, mo, model_df):
+    if len(model_df) > 0:
+        _cog = cost_of_gain_input.value
+        _analysis = f"""**At your Cost of Gain: ${_cog:.2f}/lb**
+
+| Market Type | Value of Gain | vs Your Cost | Recommendation |
+|-------------|---------------|--------------|----------------|
+"""
+        for _, _r in model_df.iterrows():
+            if "FEEDER" not in _r["market_type"]:
+                continue
+            _vog = _r["slope_total"]
+            _diff = _vog - _cog
+
+            if _diff < -0.20:
+                _rec = f"✅ Buy heavier - save ${abs(_diff):.2f}/lb"
+            elif _diff > 0.20:
+                _rec = f"⚠️ Buy lighter - you gain ${_diff:.2f}/lb by feeding"
+            else:
+                _rec = "➖ Near break-even - weight doesn't matter much"
+
+            _analysis += f"| {_r['market_type']} | ${_vog:.2f}/lb | ${_diff:+.2f}/lb | {_rec} |\n"
+
+        _analysis += f"""
+---
+**Example for FEEDER STEER** (if Value of Gain = $0.80/lb):
+- Buy 400 lb calf → feed to 700 lb → 300 lbs gain × ${_cog:.2f} = ${300*_cog:.0f} feed cost
+- Buy 550 lb calf → feed to 700 lb → 150 lbs gain × ${_cog:.2f} = ${150*_cog:.0f} feed cost
+- Difference: ${300*_cog - 150*_cog:.0f} saved on feed vs. ${150*0.80:.0f} more paid for heavier calf
 """
         mo.md(_analysis)
     return
