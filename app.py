@@ -8,31 +8,17 @@ app = marimo.App(width="full")
 def _():
     import marimo as mo
     import pandas as pd
-    import plotly.express as px
-    import plotly.graph_objects as go
-    import plotly.io as pio
+    import altair as alt
+    import numpy as np
     from pathlib import Path
 
     # Professional color palette (IBM colorblind-safe)
-    COLOR_SEQUENCE = ["#648FFF", "#DC267F", "#FFB000", "#FE6100", "#785EF0", "#1B9E77"]
+    COLOR_SCHEME = ["#648FFF", "#DC267F", "#FFB000", "#FE6100", "#785EF0", "#1B9E77"]
 
-    # Custom Plotly template (dark theme to match Marimo)
-    pio.templates["livestock"] = go.layout.Template(
-        layout=go.Layout(
-            font=dict(family="system-ui, -apple-system, sans-serif", size=12, color="#E5E7EB"),
-            title=dict(font=dict(size=16, color="#F9FAFB"), x=0, xanchor="left"),
-            paper_bgcolor="#1F2937",
-            plot_bgcolor="#111827",
-            xaxis=dict(showgrid=True, gridcolor="#374151", showline=True, linecolor="#4B5563", tickcolor="#9CA3AF"),
-            yaxis=dict(showgrid=True, gridcolor="#374151", showline=False, tickcolor="#9CA3AF"),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, bgcolor="rgba(0,0,0,0)"),
-            colorway=COLOR_SEQUENCE,
-            margin=dict(l=60, r=30, t=80, b=60),
-        )
-    )
-    pio.templates.default = "livestock"
+    # Configure Altair for dark theme
+    alt.themes.enable("dark")
 
-    return COLOR_SEQUENCE, Path, go, mo, pd, pio, px
+    return COLOR_SCHEME, Path, alt, mo, np, pd
 
 
 @app.cell
@@ -123,7 +109,7 @@ def _(mo):
 
 
 @app.cell
-def _(COLOR_SEQUENCE, filtered_df, go):
+def _(COLOR_SCHEME, alt, filtered_df):
     monthly_avg = (
         filtered_df[filtered_df["avg_price"] > 0]
         .groupby(["year_month", "cattle_type"])
@@ -131,24 +117,20 @@ def _(COLOR_SEQUENCE, filtered_df, go):
         .reset_index()
     )
 
-    price_fig = go.Figure()
-    for _i, _ct in enumerate(sorted(monthly_avg["cattle_type"].unique())):
-        _data = monthly_avg[monthly_avg["cattle_type"] == _ct].sort_values("year_month")
-        price_fig.add_trace(go.Scatter(
-            x=_data["year_month"], y=_data["avg_price"],
-            mode="lines+markers", name=_ct,
-            line=dict(width=2.5, color=COLOR_SEQUENCE[_i % len(COLOR_SEQUENCE)]),
-            marker=dict(size=5),
-        ))
-
-    price_fig.update_layout(
-        title="Monthly Average Prices by Cattle Type",
-        xaxis_title="Month", yaxis_title="Average Price ($/cwt)",
-        yaxis_tickprefix="$", height=400, hovermode="x unified",
+    price_chart = (
+        alt.Chart(monthly_avg)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("year_month:O", title="Month", axis=alt.Axis(labelAngle=-45)),
+            y=alt.Y("avg_price:Q", title="Average Price ($/cwt)"),
+            color=alt.Color("cattle_type:N", title="Cattle Type", scale=alt.Scale(range=COLOR_SCHEME)),
+            tooltip=["year_month", "cattle_type", alt.Tooltip("avg_price:Q", format="$.2f"), "head_count:Q"],
+        )
+        .properties(width="container", height=400, title="Monthly Average Prices by Cattle Type")
+        .interactive()
     )
-    price_fig.update_xaxes(tickangle=-45, nticks=20)
-    price_fig
-    return monthly_avg, price_fig
+    price_chart
+    return monthly_avg, price_chart
 
 
 @app.cell
@@ -158,18 +140,23 @@ def _(mo):
 
 
 @app.cell
-def _(filtered_df, px):
+def _(COLOR_SCHEME, alt, filtered_df):
     volume_data = filtered_df.groupby(["year_month", "category"]).agg({"head_count": "sum"}).reset_index()
 
-    volume_fig = px.bar(
-        volume_data, x="year_month", y="head_count", color="category",
-        title="Monthly Volume by Category",
-        labels={"year_month": "Month", "head_count": "Head Count", "category": "Category"},
-        height=350,
+    volume_chart = (
+        alt.Chart(volume_data)
+        .mark_bar()
+        .encode(
+            x=alt.X("year_month:O", title="Month", axis=alt.Axis(labelAngle=-45)),
+            y=alt.Y("head_count:Q", title="Head Count"),
+            color=alt.Color("category:N", title="Category", scale=alt.Scale(range=COLOR_SCHEME)),
+            tooltip=["year_month", "category", "head_count:Q"],
+        )
+        .properties(width="container", height=350, title="Monthly Volume by Category")
+        .interactive()
     )
-    volume_fig.update_xaxes(tickangle=-45, nticks=20)
-    volume_fig
-    return volume_data, volume_fig
+    volume_chart
+    return volume_chart, volume_data
 
 
 @app.cell
@@ -186,10 +173,7 @@ def _(mo):
 
 
 @app.cell
-def _(COLOR_SEQUENCE, filtered_df, go, halflife_slider, pd, px):
-    import numpy as np
-    import statsmodels.api as sm
-
+def _(COLOR_SCHEME, alt, filtered_df, halflife_slider, np, pd):
     scatter_full = filtered_df[(filtered_df["avg_weight"] > 0) & (filtered_df["avg_price"] > 0)].copy()
     scatter_full["market_type"] = scatter_full["category"] + " " + scatter_full["cattle_type"]
 
@@ -199,43 +183,91 @@ def _(COLOR_SEQUENCE, filtered_df, go, halflife_slider, pd, px):
     _halflife_days = halflife_slider.value * 30
     scatter_full["weight"] = np.exp(-np.log(2) * scatter_full["days_ago"] / _halflife_days)
 
-    # Weighted regression
+    # Simple weighted regression using numpy (no statsmodels needed)
     reg_results = []
-    trend_lines = []
     for _mt in sorted(scatter_full["market_type"].unique()):
         _sub = scatter_full[scatter_full["market_type"] == _mt]
         if len(_sub) > 10:
-            _X = sm.add_constant(_sub["avg_weight"])
-            _model = sm.WLS(_sub["avg_price"], _X, weights=_sub["weight"]).fit()
-            _int, _slope = _model.params
-            reg_results.append({"market_type": _mt, "slope": _slope, "intercept": _int, "r2": _model.rsquared, "n": len(_sub)})
-            _xr = np.linspace(_sub["avg_weight"].min(), _sub["avg_weight"].max(), 50)
-            trend_lines.append({"mt": _mt, "x": _xr, "y": _int + _slope * _xr})
+            # Weighted least squares using numpy
+            _x = _sub["avg_weight"].values
+            _y = _sub["avg_price"].values
+            _w = _sub["weight"].values
+
+            # Weighted mean
+            _xw = np.sum(_w * _x) / np.sum(_w)
+            _yw = np.sum(_w * _y) / np.sum(_w)
+
+            # Weighted slope and intercept
+            _num = np.sum(_w * (_x - _xw) * (_y - _yw))
+            _den = np.sum(_w * (_x - _xw) ** 2)
+            _slope = _num / _den if _den != 0 else 0
+            _intercept = _yw - _slope * _xw
+
+            # R-squared
+            _y_pred = _intercept + _slope * _x
+            _ss_res = np.sum(_w * (_y - _y_pred) ** 2)
+            _ss_tot = np.sum(_w * (_y - _yw) ** 2)
+            _r2 = 1 - _ss_res / _ss_tot if _ss_tot != 0 else 0
+
+            reg_results.append({
+                "market_type": _mt,
+                "slope": _slope,
+                "intercept": _intercept,
+                "r2": _r2,
+                "n": len(_sub),
+                "x_min": _sub["avg_weight"].min(),
+                "x_max": _sub["avg_weight"].max(),
+            })
 
     reg_df = pd.DataFrame(reg_results)
 
-    # Sample for plotting
+    # Sample for plotting (max 300 per market type)
     scatter_sample = scatter_full.groupby("market_type", group_keys=False).apply(
         lambda x: x.sample(n=min(len(x), 300), random_state=42), include_groups=False
     )
     scatter_sample["market_type"] = scatter_full.loc[scatter_sample.index, "market_type"]
 
-    scatter_fig = px.scatter(
-        scatter_sample, x="avg_weight", y="avg_price", color="market_type",
-        title=f"Weight vs Price ({halflife_slider.value}-month half-life)",
-        labels={"avg_weight": "Weight (lbs)", "avg_price": "Price ($/cwt)", "market_type": "Market Type"},
-        opacity=0.5, height=500,
+    # Create trend line data
+    trend_data = []
+    for _, _r in reg_df.iterrows():
+        for _x in np.linspace(_r["x_min"], _r["x_max"], 50):
+            trend_data.append({
+                "market_type": _r["market_type"],
+                "avg_weight": _x,
+                "avg_price": _r["intercept"] + _r["slope"] * _x,
+            })
+    trend_df = pd.DataFrame(trend_data)
+
+    # Scatter plot
+    scatter_points = (
+        alt.Chart(scatter_sample)
+        .mark_circle(opacity=0.5)
+        .encode(
+            x=alt.X("avg_weight:Q", title="Weight (lbs)"),
+            y=alt.Y("avg_price:Q", title="Price ($/cwt)"),
+            color=alt.Color("market_type:N", title="Market Type", scale=alt.Scale(range=COLOR_SCHEME)),
+            tooltip=["market_type", alt.Tooltip("avg_weight:Q", format=".0f"), alt.Tooltip("avg_price:Q", format="$.2f")],
+        )
     )
 
-    for _j, _t in enumerate(trend_lines):
-        scatter_fig.add_trace(go.Scatter(
-            x=_t["x"], y=_t["y"], mode="lines", showlegend=False,
-            line=dict(color=COLOR_SEQUENCE[_j % len(COLOR_SEQUENCE)], width=3),
-        ))
+    # Trend lines
+    trend_lines = (
+        alt.Chart(trend_df)
+        .mark_line(strokeWidth=3)
+        .encode(
+            x="avg_weight:Q",
+            y="avg_price:Q",
+            color=alt.Color("market_type:N", scale=alt.Scale(range=COLOR_SCHEME)),
+        )
+    )
 
-    scatter_fig.update_layout(yaxis_tickprefix="$")
-    scatter_fig
-    return np, reg_df, reg_results, scatter_fig, scatter_full, scatter_sample, sm, trend_lines
+    scatter_chart = (
+        (scatter_points + trend_lines)
+        .properties(width="container", height=500, title=f"Weight vs Price ({halflife_slider.value}-month half-life)")
+        .interactive()
+    )
+    scatter_chart
+    return reg_df, reg_results, scatter_chart, scatter_full, scatter_sample, trend_data, trend_df, trend_lines, scatter_points
 
 
 @app.cell
@@ -256,7 +288,7 @@ def _(mo):
 
 
 @app.cell
-def _(filtered_df, px):
+def _(COLOR_SCHEME, alt, filtered_df):
     yearly_data = (
         filtered_df[filtered_df["avg_price"] > 0]
         .groupby(["year", "cattle_type"])
@@ -264,15 +296,20 @@ def _(filtered_df, px):
         .reset_index()
     )
 
-    yearly_fig = px.bar(
-        yearly_data, x="year", y="avg_price", color="cattle_type", barmode="group",
-        title="Average Prices by Year and Cattle Type",
-        labels={"year": "Year", "avg_price": "Avg Price ($/cwt)", "cattle_type": "Cattle Type"},
-        height=400,
+    yearly_chart = (
+        alt.Chart(yearly_data)
+        .mark_bar()
+        .encode(
+            x=alt.X("year:O", title="Year"),
+            y=alt.Y("avg_price:Q", title="Avg Price ($/cwt)"),
+            color=alt.Color("cattle_type:N", title="Cattle Type", scale=alt.Scale(range=COLOR_SCHEME)),
+            xOffset="cattle_type:N",
+            tooltip=["year", "cattle_type", alt.Tooltip("avg_price:Q", format="$.2f")],
+        )
+        .properties(width="container", height=400, title="Average Prices by Year and Cattle Type")
     )
-    yearly_fig.update_layout(yaxis_tickprefix="$", xaxis_type="category")
-    yearly_fig
-    return yearly_data, yearly_fig
+    yearly_chart
+    return yearly_chart, yearly_data
 
 
 @app.cell
