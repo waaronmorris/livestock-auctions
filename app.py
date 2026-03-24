@@ -537,6 +537,124 @@ def _(COLOR_SCHEME, alt, filtered_df):
 
 @app.cell
 def _(mo):
+    mo.md("""## Seasonal Trends
+
+*Average prices by calendar month across all years. Identifies recurring seasonal patterns — when prices tend to peak and dip.*
+    """)
+    return
+
+
+@app.cell
+def _(COLOR_SCHEME, alt, filtered_df):
+    # Calculate seasonal averages by month and cattle type
+    seasonal_df = filtered_df[filtered_df["avg_price"] > 0].copy()
+    seasonal_df["month_name"] = seasonal_df["auction_date"].dt.strftime("%b")
+    seasonal_df["month_num"] = seasonal_df["auction_date"].dt.month
+
+    # Month ordering for charts
+    _month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    # Aggregate: average price per month across all years, by cattle type
+    seasonal_avg = (
+        seasonal_df.groupby(["month_num", "month_name", "cattle_type"])
+        .agg(avg_price=("avg_price", "mean"), head_count=("head_count", "sum"), n_records=("avg_price", "count"))
+        .reset_index()
+    )
+
+    # Overall monthly average (across all cattle types) for seasonal index
+    overall_monthly = (
+        seasonal_df.groupby(["month_num", "month_name"])
+        .agg(avg_price=("avg_price", "mean"))
+        .reset_index()
+    )
+    _grand_mean = seasonal_df["avg_price"].mean()
+    overall_monthly["seasonal_index"] = (overall_monthly["avg_price"] / _grand_mean * 100).round(1)
+
+    # Seasonal pattern chart — lines by cattle type
+    seasonal_chart = (
+        alt.Chart(seasonal_avg)
+        .mark_line(point=True, strokeWidth=2)
+        .encode(
+            x=alt.X("month_name:N", title="Month", sort=_month_order),
+            y=alt.Y("avg_price:Q", title="Average Price ($/cwt)"),
+            color=alt.Color("cattle_type:N", title="Cattle Type", scale=alt.Scale(range=COLOR_SCHEME)),
+            tooltip=[
+                "month_name",
+                "cattle_type",
+                alt.Tooltip("avg_price:Q", format="$.2f", title="Avg Price"),
+                alt.Tooltip("head_count:Q", format=",", title="Total Head"),
+                alt.Tooltip("n_records:Q", title="Records"),
+            ],
+        )
+        .properties(width="container", height=400, title="Seasonal Price Pattern by Cattle Type (All Years)")
+    )
+    seasonal_chart
+    return _month_order, overall_monthly, seasonal_avg, seasonal_chart, seasonal_df
+
+
+@app.cell
+def _(_month_order, mo, overall_monthly):
+    # Seasonal index table
+    _idx = overall_monthly.sort_values("month_num")
+    _table = "| Month | Avg Price ($/cwt) | Seasonal Index | Signal |\n|-------|-------------------|----------------|--------|\n"
+    for _, _r in _idx.iterrows():
+        _si = _r["seasonal_index"]
+        if _si >= 105:
+            _signal = "Above avg"
+        elif _si <= 95:
+            _signal = "Below avg"
+        else:
+            _signal = "Near avg"
+        _table += f"| {_r['month_name']} | ${_r['avg_price']:.2f} | {_si:.1f} | {_signal} |\n"
+
+    _best = _idx.loc[_idx["seasonal_index"].idxmax()]
+    _worst = _idx.loc[_idx["seasonal_index"].idxmin()]
+
+    mo.md(f"""**Seasonal Index** *(100 = yearly average)*
+
+{_table}
+
+**Peak month:** {_best['month_name']} (index {_best['seasonal_index']:.1f}) · **Low month:** {_worst['month_name']} (index {_worst['seasonal_index']:.1f})
+    """)
+    return
+
+
+@app.cell
+def _(alt, filtered_df):
+    # Month × Year heatmap
+    heatmap_df = filtered_df[filtered_df["avg_price"] > 0].copy()
+    heatmap_df["month_name"] = heatmap_df["auction_date"].dt.strftime("%b")
+    heatmap_df["month_num"] = heatmap_df["auction_date"].dt.month
+
+    heatmap_agg = (
+        heatmap_df.groupby(["year", "month_num", "month_name"])
+        .agg(avg_price=("avg_price", "mean"))
+        .reset_index()
+    )
+
+    _month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    heatmap_chart = (
+        alt.Chart(heatmap_agg)
+        .mark_rect()
+        .encode(
+            x=alt.X("month_name:N", title="Month", sort=_month_order),
+            y=alt.Y("year:O", title="Year"),
+            color=alt.Color("avg_price:Q", title="$/cwt", scale=alt.Scale(scheme="viridis")),
+            tooltip=[
+                "year:O",
+                "month_name",
+                alt.Tooltip("avg_price:Q", format="$.2f", title="Avg Price"),
+            ],
+        )
+        .properties(width="container", height=250, title="Price Heatmap: Month × Year")
+    )
+    heatmap_chart
+    return heatmap_agg, heatmap_chart, heatmap_df
+
+
+@app.cell
+def _(mo):
     mo.md("## Summary Statistics")
     return
 
